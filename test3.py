@@ -1,94 +1,89 @@
 import base64
-import itertools
+import string
 
-# 字母频率表
+
+# 计算汉明距离
+def calculate_hamming_distance(a, b):
+distance = 0
+for byte_a, byte_b in zip(a, b):
+res = byte_a ^ byte_b
+distance += bin(res).count('1')
+return distance
+
+
+# 猜测密钥长度
+def get_key_size(cipher_bytes):
+key_sizes = []
+for key_size in range(2, 41):
+blocks = [cipher_bytes[i:i + key_size] for i in range(0, len(cipher_bytes), key_size)]
+distances = []
+for i in range(len(blocks) - 1):
+block1 = blocks[i]
+block2 = blocks[i + 1]
+distance = calculate_hamming_distance(block1, block2) / key_size
+distances.append(distance)
+avg_distance = sum(distances) / len(distances)
+key_sizes.append({'key_size': key_size, 'avg_distance': avg_distance})
+# 选择具有最小平均归一化汉明距离的密钥长度
+chosen_key_size = min(key_sizes, key=lambda x: x['avg_distance'])
+return chosen_key_size['key_size']
+
+
+# 英文频率评分
+def english_scoring(text):
 letter_frequency = {
-    'a': 0.0651738, 'b': 0.0124248, 'c': 0.0217339,
-    'd': 0.0349835, 'e': 0.1041442, 'f': 0.0197881,
-    'g': 0.0158610, 'h': 0.0492888, 'i': 0.0558094,
-    'j': 0.0009033, 'k': 0.0050529, 'l': 0.0331490,
-    'm': 0.0202124, 'n': 0.0564513, 'o': 0.0596302,
-    'p': 0.0137645, 'q': 0.0008606, 'r': 0.0497563,
-    's': 0.0515760, 't': 0.0729357, 'u': 0.0225134,
-    'v': 0.0082903, 'w': 0.0171272, 'x': 0.0013692,
-    'y': 0.0145984, 'z': 0.0007836, ' ': 0.1918182
+'a': .08167, 'b': .01492, 'c': .02782, 'd': .04253,
+'e': .12702, 'f': .02228, 'g': .02015, 'h': .06094,
+'i': .06094, 'j': .00153, 'k': .00772, 'l': .04025,
+'m': .02406, 'n': .06749, 'o': .07507, 'p': .01929,
+'q': .00095, 'r': .05987, 's': .06327, 't': .09056,
+'u': .02758, 'v': .00978, 'w': .02360, 'x': .00150,
+'y': .01974, 'z': .00074, ' ': .15000
 }
+return sum([letter_frequency.get(chr(byte), 0) for byte in text.lower()])
 
-# 计算文本频率分
-def calculate_text_score(byte_array):
-    score = 0
-    for byte in byte_array:
-        score += letter_frequency.get(chr(byte).lower(), 0)
-    return score
 
-# 异或
-def xor_with_single_char(byte_array, key_byte):
-    result = b''
-    for byte in byte_array:
-        result += bytes([byte ^ key_byte])
-    return result
+# 单字节 XOR 解密
+def single_xor(ciphertext, single_char):
+return bytes([byte ^ single_char for byte in ciphertext])
 
-# 用字频法破解单字节加密的密文
-def brute_force_single_char_xor(ciphertext):
-    results = []
-    for key in range(256):
-        plaintext = xor_with_single_char(ciphertext, key)
-        score = calculate_text_score(plaintext)
-        results.append({
-            'key': key,
-            'score': score,
-            'plaintext': plaintext
-        })
-    return sorted(results, key=lambda x: x['score'], reverse=True)[0]
 
-# 字符串与重复密钥异或
-def xor_with_repeating_key(byte_array, key):
-    result = b''
-    key_length = len(key)
-    for i, byte in enumerate(byte_array):
-        result += bytes([byte ^ key[i % key_length]])
-    return result
+# 破解单字节 XOR 密文
+def decrypt_single_byte_xor(ciphertext):
+scores = []
+for single_char in range(256):
+decrypted_text = single_xor(ciphertext, single_char)
+score = english_scoring(decrypted_text)
+scores.append({'char': single_char, 'decrypted_text': decrypted_text, 'score': score})
+return max(scores, key=lambda x: x['score'])
 
-# 计算两个字符串的hamming距离
-def compute_hamming_distance(string1, string2):
-    assert len(string1) == len(string2)
-    distance = 0
-    for byte1, byte2 in zip(string1, string2):
-        xor_result = byte1 ^ byte2
-        distance += bin(xor_result).count('1')
-    return distance
 
+# 使用重复密钥 XOR 解密
+def repeating_key_xor(ciphertext, key):
+return bytes([ciphertext[i] ^ key[i % len(key)] for i in range(len(ciphertext))])
+
+
+# 破解重复密钥 XOR 加密的密文
 def break_repeating_key_xor(ciphertext):
-    key_size_distances = {}
-    for key_size in range(2, 41):
-        chunks = [ciphertext[i:i + key_size] for i in range(0, len(ciphertext), key_size)][:4]
-        total_distance = 0
-        pairs = itertools.combinations(chunks, 2)
-        for chunk1, chunk2 in pairs:
-            total_distance += compute_hamming_distance(chunk1, chunk2)
-        average_distance = total_distance / 6
-        normalized_distance = average_distance / key_size
-        key_size_distances[key_size] = normalized_distance
-    
-    best_key_sizes = sorted(key_size_distances, key=key_size_distances.get)[:3]
-    print(best_key_sizes)
+key_size = get_key_size(ciphertext)
+print(f"Chosen key size: {key_size}")
 
-    decrypted_plaintexts = []
-    for size in best_key_sizes:
-        key = b''
-        for i in range(size):
-            block = b''
-            for j in range(i, len(ciphertext), size):
-                block += bytes([ciphertext[j]])
-            key += bytes([brute_force_single_char_xor(block)['key']])
-        decrypted_plaintexts.append((xor_with_repeating_key(ciphertext, key), key))
-    
-    return max(decrypted_plaintexts, key=lambda x: calculate_text_score(x[0]))
+blocks = [ciphertext[i:i + key_size] for i in range(0, len(ciphertext), key_size)]
+key = b''
 
-#解密
-with open("ciphertext.txt") as file:
-    encoded_data = base64.b64decode(file.read())
-decrypted_result = break_repeating_key_xor(encoded_data)
-print("The Key is", decrypted_result[1].decode())
-print("The Length is", len(decrypted_result[1].decode()))
-print(decrypted_result[0].decode().rstrip())
+for i in range(key_size):
+column = bytes([block[i] for block in blocks if i < len(block)])
+result = decrypt_single_byte_xor(column)
+key += bytes([result['char']])
+
+decrypted_message = repeating_key_xor(ciphertext, key)
+return decrypted_message, key
+
+
+if __name__ == '__main__':
+with open('experiment1_3_txt') as file:
+ciphertext = file.read()
+cipher_bytes = base64.b64decode(ciphertext)
+decrypted_message, key = break_repeating_key_xor(cipher_bytes)
+print("Decrypted message:", decrypted_message.decode())
+print("Key:", key.decode())
